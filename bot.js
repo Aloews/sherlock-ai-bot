@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { Telegraf } from 'telegraf';
 
@@ -158,10 +159,16 @@ async function main() {
   console.log('Management bot started');
 }
 
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+const isMainModule = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 
-main().catch((err) => {
-  console.error('Failed to start management bot:', err);
-  process.exit(1);
-});
+if (isMainModule) {
+  process.once('SIGINT', () => bot.stop('SIGINT'));
+  process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
+  main().catch((err) => {
+    console.error('Failed to start management bot:', err);
+    process.exit(1);
+  });
+}
+
+export { isAdmin, buildCloneUrl, formatError, formatOutput };
