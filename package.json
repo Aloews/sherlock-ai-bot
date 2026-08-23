@@ -1,23 +1,22 @@
 {
-  "compilerOptions": {
-    "target": "ES2020",
-    "module": "ESNext",
-    "moduleResolution": "Node",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "outDir": "dist"
+  "name": "sherlock-ai-bot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "include": [
-    "api/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules"
-  ],
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",   // <-- вот эта строка
+  "dependencies": {
+    "openai": "^...",
+    "telegraf": "^..."
+  },
   "devDependencies": {
-    "@types/node": "^26.2.0",
-    "@vercel/node": "^7.0.0",
-    "typescript": "^7.0.2"
+    "@types/node": "^...",
+    "@vercel/node": "^...",
+    "typescript": "^..."
   }
 }
