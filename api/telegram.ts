@@ -1,42 +1,44 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { Telegraf } from 'telegraf';
-import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 
-// Переменные окружения (настраиваются в Vercel)
+// Переменные окружения (задаются в Vercel)
 const botToken = process.env.BOT_TOKEN!;
 const starimgKey = process.env.STARIMG_API_KEY!;
-const baseURL = process.env.STARIMG_BASE_URL || 'https://ai.starimg.ru/v1';
+const baseURL = process.env.STARIMG_BASE_URL || 'https://ai.starimg.ru'; // БЕЗ /v1 для Anthropic
 const model = process.env.AI_MODEL || 'claude-opus-5';
 
 if (!botToken || !starimgKey) {
   throw new Error('BOT_TOKEN and STARIMG_API_KEY are required');
 }
 
-// Инициализация OpenAI клиента (используем Starimg как OpenAI-совместимый)
-const client = new OpenAI({
+// Инициализация Anthropic клиента
+const client = new Anthropic({
   apiKey: starimgKey,
-  baseURL: baseURL,
+  baseURL: baseURL, // Starimg ожидает Anthropic-совместимый API
 });
 
 // Создаём экземпляр Telegraf
 const bot = new Telegraf(botToken);
 
-// Обработка текстовых сообщений
 bot.on('text', async (ctx) => {
   const userMessage = ctx.message.text;
+
   try {
-    // Отправляем "печатает..." (опционально)
     await ctx.replyWithChatAction('typing');
 
-    // Запрос к Starimg
-    const completion = await client.chat.completions.create({
+    const message = await client.messages.create({
       model: model,
+      max_tokens: 1024,
       messages: [{ role: 'user', content: userMessage }],
-      temperature: 0.7,
     });
 
-    const reply = completion.choices[0]?.message?.content || 'Пустой ответ от ИИ';
-    await ctx.reply(reply);
+    const reply = message.content
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text)
+      .join('');
+
+    await ctx.reply(reply || 'Пустой ответ от ИИ');
   } catch (error: any) {
     console.error('AI request failed:', error);
     await ctx.reply('Произошла ошибка при обращении к ИИ. Попробуйте позже.');
@@ -51,7 +53,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    // Передаём обновление от Telegram в Telegraf
     await bot.handleUpdate(req.body);
     res.status(200).send('OK');
   } catch (err) {

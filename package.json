@@ -11,6 +11,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.120.0",
     "openai": "^4.0.0",
     "telegraf": "^4.0.0"
   },
