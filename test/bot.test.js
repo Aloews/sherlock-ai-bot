@@ -7,7 +7,7 @@ process.env.GITHUB_REPO_URL = 'https://github.com/Aloews/sherlock-scholes';
 delete process.env.GITHUB_TOKEN;
 delete process.env.VERCEL_TOKEN;
 
-const { isAdmin, buildCloneUrl, formatError, formatOutput, vercelArgs } = await import('../bot.js');
+const { isAdmin, buildCloneUrl, formatError, formatOutput, vercelArgs, withTimeout } = await import('../bot.js');
 
 test('isAdmin allows a listed admin id', () => {
   assert.equal(isAdmin({ from: { id: 111 } }), true);
@@ -101,4 +101,24 @@ test('run() rejects clearly when the project was never cloned', async () => {
     /Проект не найден по пути \/nonexistent\/path\/for\/tests/
   );
   delete process.env.PROJECT_PATH;
+});
+
+test('withTimeout resolves with the wrapped promise value when it settles first', async () => {
+  const result = await withTimeout(Promise.resolve('ok'), 1000, 'should not fire');
+  assert.equal(result, 'ok');
+});
+
+test('withTimeout rejects with the timeout message when the promise never settles', async () => {
+  const neverSettles = new Promise(() => {});
+  await assert.rejects(
+    () => withTimeout(neverSettles, 10, 'timed out for real'),
+    /timed out for real/
+  );
+});
+
+test('withTimeout propagates a rejection from the wrapped promise', async () => {
+  await assert.rejects(
+    () => withTimeout(Promise.reject(new Error('boom')), 1000, 'should not fire'),
+    /boom/
+  );
 });
