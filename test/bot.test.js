@@ -70,3 +70,35 @@ test('formatError truncates very long errors', () => {
   assert.ok(result.endsWith('... (truncated)'));
   assert.ok(result.length < 4000 + 30);
 });
+
+test('formatError redacts a leaked GITHUB_TOKEN from the error message', async () => {
+  process.env.GITHUB_TOKEN = 'ghp_supersecret123';
+  const mod = await import(`../bot.js?redact-github=${Date.now()}`);
+  const result = mod.formatError({
+    message: "Command failed: git clone https://x-access-token:ghp_supersecret123@github.com/Aloews/sherlock-scholes",
+  });
+  assert.ok(!result.includes('ghp_supersecret123'));
+  assert.ok(result.includes('***REDACTED***'));
+  delete process.env.GITHUB_TOKEN;
+});
+
+test('formatError redacts a leaked VERCEL_TOKEN from the error message', async () => {
+  process.env.VERCEL_TOKEN = 'vercel-supersecret';
+  const mod = await import(`../bot.js?redact-vercel=${Date.now()}`);
+  const result = mod.formatError({
+    message: 'Command failed: vercel --prod --yes --token vercel-supersecret',
+  });
+  assert.ok(!result.includes('vercel-supersecret'));
+  assert.ok(result.includes('***REDACTED***'));
+  delete process.env.VERCEL_TOKEN;
+});
+
+test('run() rejects clearly when the project was never cloned', async () => {
+  process.env.PROJECT_PATH = '/nonexistent/path/for/tests';
+  const mod = await import(`../bot.js?missing-project=${Date.now()}`);
+  await assert.rejects(
+    () => mod.run('git', ['status']),
+    /Проект не найден по пути \/nonexistent\/path\/for\/tests/
+  );
+  delete process.env.PROJECT_PATH;
+});

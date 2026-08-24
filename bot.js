@@ -45,16 +45,29 @@ function buildCloneUrl() {
   }
 }
 
+const SECRETS = [GITHUB_TOKEN, VERCEL_TOKEN, SUPABASE_DB_URL].filter(Boolean);
+
+function redact(text) {
+  return SECRETS.reduce((out, secret) => out.split(secret).join('***REDACTED***'), text);
+}
+
 async function ensureProjectCloned() {
   if (existsSync(PROJECT_PATH)) {
     return;
   }
   console.log(`Project not found at ${PROJECT_PATH}, cloning ${GITHUB_REPO_URL} ...`);
-  await execFileAsync('git', ['clone', buildCloneUrl(), PROJECT_PATH]);
-  console.log('Clone finished.');
+  try {
+    await execFileAsync('git', ['clone', buildCloneUrl(), PROJECT_PATH]);
+    console.log('Clone finished.');
+  } catch (err) {
+    console.error('Failed to clone project:', redact(err.message || String(err)));
+  }
 }
 
 async function run(command, args, options = {}) {
+  if (!existsSync(PROJECT_PATH)) {
+    throw new Error(`Проект не найден по пути ${PROJECT_PATH} — клонирование не удалось при старте. Проверьте GITHUB_REPO_URL/GITHUB_TOKEN и перезапустите сервис.`);
+  }
   return execFileAsync(command, args, {
     cwd: PROJECT_PATH,
     maxBuffer: 10 * 1024 * 1024,
@@ -68,11 +81,12 @@ function vercelArgs(...args) {
 
 function formatError(err) {
   const output = [err.stdout, err.stderr, err.message].filter(Boolean).join('\n').trim();
-  return output.length > 3500 ? `${output.slice(0, 3500)}\n... (truncated)` : output;
+  const redacted = redact(output);
+  return redacted.length > 3500 ? `${redacted.slice(0, 3500)}\n... (truncated)` : redacted;
 }
 
 function formatOutput(stdout, stderr) {
-  const output = [stdout, stderr].filter(Boolean).join('\n').trim() || '(пусто)';
+  const output = redact([stdout, stderr].filter(Boolean).join('\n').trim() || '(пусто)');
   return output.length > 3500 ? `${output.slice(0, 3500)}\n... (truncated)` : output;
 }
 
@@ -176,4 +190,4 @@ if (isMainModule) {
   });
 }
 
-export { isAdmin, buildCloneUrl, formatError, formatOutput, vercelArgs };
+export { isAdmin, buildCloneUrl, formatError, formatOutput, vercelArgs, redact, run };
