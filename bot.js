@@ -172,9 +172,22 @@ bot.on('text', async (ctx) => {
   );
 });
 
+function withTimeout(promise, ms, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 async function main() {
   await ensureProjectCloned();
-  await bot.launch();
+  // bot.launch() calls Telegram's getMe() first; if that connection stalls
+  // (no response, no error — observed in production) it hangs forever with
+  // zero CPU/network activity and no log line, which looks identical to a
+  // dead process from the outside. Force a crash instead so the platform's
+  // restart policy gets a chance to recover from a transient network issue.
+  await withTimeout(bot.launch(), 30_000, 'bot.launch() timed out after 30s (Telegram API unreachable?)');
   console.log('Management bot started');
 }
 
@@ -190,4 +203,4 @@ if (isMainModule) {
   });
 }
 
-export { isAdmin, buildCloneUrl, formatError, formatOutput, vercelArgs, redact, run };
+export { isAdmin, buildCloneUrl, formatError, formatOutput, vercelArgs, redact, run, withTimeout };
