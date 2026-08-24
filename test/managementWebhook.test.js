@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseGithubRepo, isAdmin, formatLogLine } from '../helpers/managementWebhook.mjs';
+import { parseGithubRepo, isAdmin, formatLogLine } from '../helpers/managementWebhook.js';
 
 test('parseGithubRepo extracts owner/repo from a plain URL', () => {
   assert.deepEqual(
