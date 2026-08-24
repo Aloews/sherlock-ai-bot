@@ -5,8 +5,9 @@ process.env.MANAGEMENT_BOT_TOKEN = 'test-token';
 process.env.ADMIN_USER_IDS = '111,222';
 process.env.GITHUB_REPO_URL = 'https://github.com/Aloews/sherlock-scholes';
 delete process.env.GITHUB_TOKEN;
+delete process.env.VERCEL_TOKEN;
 
-const { isAdmin, buildCloneUrl, formatError, formatOutput } = await import('../bot.js');
+const { isAdmin, buildCloneUrl, formatError, formatOutput, vercelArgs } = await import('../bot.js');
 
 test('isAdmin allows a listed admin id', () => {
   assert.equal(isAdmin({ from: { id: 111 } }), true);
@@ -32,6 +33,17 @@ test('buildCloneUrl injects the token as basic auth when GITHUB_TOKEN is set', a
     'https://x-access-token:ghp_test123@github.com/Aloews/sherlock-scholes'
   );
   delete process.env.GITHUB_TOKEN;
+});
+
+test('vercelArgs passes args through unchanged when no VERCEL_TOKEN is set', () => {
+  assert.deepEqual(vercelArgs('--prod', '--yes'), ['--prod', '--yes']);
+});
+
+test('vercelArgs appends --token when VERCEL_TOKEN is set', async () => {
+  process.env.VERCEL_TOKEN = 'vercel-secret';
+  const mod = await import(`../bot.js?with-vercel-token=${Date.now()}`);
+  assert.deepEqual(mod.vercelArgs('--prod', '--yes'), ['--prod', '--yes', '--token', 'vercel-secret']);
+  delete process.env.VERCEL_TOKEN;
 });
 
 test('formatOutput joins stdout and stderr', () => {

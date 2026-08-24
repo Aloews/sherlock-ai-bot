@@ -16,6 +16,7 @@ const ADMIN_USER_IDS = (process.env.ADMIN_USER_IDS || '')
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_REPO_URL = process.env.GITHUB_REPO_URL || 'https://github.com/Aloews/sherlock-scholes';
 const SUPABASE_DB_URL = process.env.SUPABASE_DB_URL;
+const VERCEL_TOKEN = process.env.VERCEL_TOKEN;
 
 if (!MANAGEMENT_BOT_TOKEN) {
   throw new Error('MANAGEMENT_BOT_TOKEN is required');
@@ -59,6 +60,10 @@ async function run(command, args, options = {}) {
     maxBuffer: 10 * 1024 * 1024,
     ...options,
   });
+}
+
+function vercelArgs(...args) {
+  return VERCEL_TOKEN ? [...args, '--token', VERCEL_TOKEN] : args;
 }
 
 function formatError(err) {
@@ -110,7 +115,7 @@ bot.command('deploy', async (ctx) => {
   try {
     await ctx.replyWithChatAction('typing');
     await ctx.reply('Запускаю деплой...');
-    const { stdout, stderr } = await run('vercel', ['--prod', '--yes']);
+    const { stdout, stderr } = await run('vercel', vercelArgs('--prod', '--yes'));
     await ctx.reply(`Деплой завершён:\n${formatOutput(stdout, stderr)}`);
   } catch (err) {
     await ctx.reply(`Ошибка деплоя:\n${formatError(err)}`);
@@ -120,7 +125,7 @@ bot.command('deploy', async (ctx) => {
 bot.command('logs', async (ctx) => {
   try {
     await ctx.replyWithChatAction('typing');
-    const { stdout, stderr } = await run('vercel', ['logs', '--limit', '10']);
+    const { stdout, stderr } = await run('vercel', vercelArgs('logs', '--limit', '10'));
     await ctx.reply(`Логи Vercel:\n${formatOutput(stdout, stderr)}`);
   } catch (err) {
     await ctx.reply(`Ошибка:\n${formatError(err)}`);
@@ -171,4 +176,4 @@ if (isMainModule) {
   });
 }
 
-export { isAdmin, buildCloneUrl, formatError, formatOutput };
+export { isAdmin, buildCloneUrl, formatError, formatOutput, vercelArgs };
