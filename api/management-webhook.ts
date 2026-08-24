@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { Telegraf } from 'telegraf';
-import { parseGithubRepo, isAdmin, formatLogLine } from '../helpers/managementWebhook.mjs';
+import { parseGithubRepo, isAdmin, formatLogLine } from '../helpers/managementWebhook.js';
 
 // Same management bot as the Railway long-polling version (bot.js), but as
 // a Vercel webhook: Railway's outbound network to api.telegram.org turned
@@ -28,9 +28,13 @@ const VERCEL_PROJECT_ID = process.env.VERCEL_PROJECT_ID || 'prj_zPmwoDaqeK57VzUB
 const VERCEL_TEAM_ID = process.env.VERCEL_TEAM_ID || 'team_e1o23XoY7tj0C19a4zwqDMhT';
 const VERCEL_DEPLOY_HOOK_URL = process.env.VERCEL_DEPLOY_HOOK_URL;
 
-if (!MANAGEMENT_BOT_TOKEN) {
-  throw new Error('MANAGEMENT_BOT_TOKEN is required');
-}
+// Deliberately NOT thrown at module scope: a module-level throw makes every
+// request — including a plain GET health check — fail as an opaque 500 with
+// nothing to read, which is exactly what happened on the first deploy. Fail
+// per-request instead, saying which variable is missing.
+const CONFIG_ERROR = !MANAGEMENT_BOT_TOKEN
+  ? 'MANAGEMENT_BOT_TOKEN is not set on this Vercel project. Add it in Project Settings → Environment Variables, then redeploy (env changes need a new deployment to take effect).'
+  : null;
 
 const { owner: GITHUB_OWNER, repo: GITHUB_REPO } = parseGithubRepo(GITHUB_REPO_URL);
 
@@ -133,7 +137,10 @@ async function fetchRecentLogs(limit = 10): Promise<string> {
   return lines.slice(-limit).join('\n');
 }
 
-const bot = new Telegraf(MANAGEMENT_BOT_TOKEN);
+// Empty-string fallback keeps construction side-effect-free when the token is
+// missing; CONFIG_ERROR short-circuits the handler before any update reaches
+// this instance, so it never actually talks to Telegram unconfigured.
+const bot = new Telegraf(MANAGEMENT_BOT_TOKEN ?? '');
 
 bot.use(async (ctx, next) => {
   if (!ctx.message || !('text' in ctx.message)) {
@@ -200,6 +207,15 @@ bot.on('text', async (ctx) => {
 });
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (CONFIG_ERROR) {
+    console.error('Management webhook misconfigured:', CONFIG_ERROR);
+    // 200 on purpose for POST: Telegram retries and eventually disables a
+    // webhook that keeps erroring, and a config problem won't fix itself on
+    // retry. The GET health check is what surfaces the message to a human.
+    res.status(req.method === 'POST' ? 200 : 500).send(CONFIG_ERROR);
+    return;
+  }
+
   if (req.method !== 'POST') {
     res.status(200).send('Management bot webhook is running');
     return;
