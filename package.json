@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "start": "node bot.js"
+    "start": "node bot.js",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [],
   "author": "",
