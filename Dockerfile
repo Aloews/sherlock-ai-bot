@@ -6,7 +6,7 @@ RUN apt-get update \
 
 RUN npm install -g vercel supabase pm2
 
-WORKDIR /app
+WORKDIR /srv/app
 
 COPY package*.json ./
 RUN npm install --omit=dev
