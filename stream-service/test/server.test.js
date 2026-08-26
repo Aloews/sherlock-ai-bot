@@ -112,3 +112,71 @@ test('unknown route returns 404', async () => {
     server.close();
   }
 });
+
+// ─── Сжатие каталога ────────────────────────────────────────────────────────
+//
+// Боевой каталог — 824 КБ, и отдавался он БЕЗ СЖАТИЯ: заголовка
+// `content-encoding` в ответе не было вовсе, `Accept-Encoding: gzip`
+// игнорировался. Замер по боевому телу: 824 343 → 172 835 байт, в 4.8 раза.
+// Снаружи эта разница выглядит как «ТВ не работает»: на медленном канале
+// экран молчит секунды, пока едет список.
+
+test('GET /playlist.m3u8 сжимает, когда клиент просит gzip', async () => {
+  const body = '#EXTM3U\n' + '#EXTINF:-1,Channel\nhttp://example.com/ch.m3u8\n'.repeat(400);
+  const upstream = await startMockUpstream(body);
+  const handler = createRequestHandler({ sourceUrl: upstream.url, cacheTtlMs: 60_000 });
+  const { server, baseUrl } = await startHttpServer(handler);
+  try {
+    const res = await fetch(`${baseUrl}/playlist.m3u8`, {
+      headers: { 'accept-encoding': 'gzip, deflate' },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-encoding'), 'gzip');
+    // Сжатое тело обязано быть ЗАМЕТНО меньше исходного, иначе «сжатие» есть
+    // только в заголовке. Повторяющийся M3U жмётся в разы, а не на проценты.
+    assert.ok(Number(res.headers.get('content-length')) < body.length / 2,
+      'gzip-тело должно быть меньше половины исходного');
+    // fetch распакует сам — содержимое обязано совпасть побайтно.
+    assert.equal(await res.text(), body);
+  } finally {
+    server.close();
+    upstream.server.close();
+  }
+});
+
+// ⚠️ ОТРИЦАТЕЛЬНЫЙ КОНТРОЛЬ. Без него проверка выше «пройдёт» и у сервера,
+// который жмёт ВСЕГДА, — а такой сервер отдаст двоичный мусор клиенту, не
+// умеющему распаковывать. Именно это ломает часть HLS-плееров и прокси.
+test('GET /playlist.m3u8 НЕ сжимает, когда клиент не просил', async () => {
+  const body = '#EXTM3U\n' + '#EXTINF:-1,Channel\nhttp://example.com/ch.m3u8\n'.repeat(400);
+  const upstream = await startMockUpstream(body);
+  const handler = createRequestHandler({ sourceUrl: upstream.url, cacheTtlMs: 60_000 });
+  const { server, baseUrl } = await startHttpServer(handler);
+  try {
+    const res = await fetch(`${baseUrl}/playlist.m3u8`, {
+      headers: { 'accept-encoding': 'identity' },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-encoding'), null);
+    assert.equal(Number(res.headers.get('content-length')), Buffer.byteLength(body));
+    assert.equal(await res.text(), body);
+  } finally {
+    server.close();
+    upstream.server.close();
+  }
+});
+
+// Без `vary` общий кэш отдаст сжатый ответ тому, кто сжатие не просил.
+test('GET /playlist.m3u8 объявляет vary: accept-encoding', async () => {
+  const upstream = await startMockUpstream('#EXTM3U\n');
+  const handler = createRequestHandler({ sourceUrl: upstream.url, cacheTtlMs: 60_000 });
+  const { server, baseUrl } = await startHttpServer(handler);
+  try {
+    const res = await fetch(`${baseUrl}/playlist.m3u8`);
+    assert.match(res.headers.get('vary') || '', /accept-encoding/i);
+    await res.text();
+  } finally {
+    server.close();
+    upstream.server.close();
+  }
+});

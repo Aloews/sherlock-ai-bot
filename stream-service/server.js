@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
+import { gzipSync } from 'node:zlib';
 
 function createPlaylistCache(sourceUrl, cacheTtlMs) {
   let cache = null;
@@ -15,7 +16,10 @@ function createPlaylistCache(sourceUrl, cacheTtlMs) {
       }
       const body = await response.text();
       const contentType = response.headers.get('content-type') || 'application/vnd.apple.mpegurl';
-      cache = { body, contentType, fetchedAt: Date.now() };
+      // ⚠️ СЖИМАЕМ ОДИН РАЗ НА ОБНОВЛЕНИЕ, А НЕ НА ЗАПРОС. Каталог — 824 КБ,
+      // и gzip по нему стоит десятки миллисекунд процессора. На запрос это
+      // означало бы платить их каждому зрителю; на обновление — раз в TTL.
+      cache = { body, contentType, fetchedAt: Date.now(), gzipped: gzipSync(body) };
       return cache;
     } catch (err) {
       if (cache) {
@@ -54,10 +58,40 @@ function createRequestHandler({ sourceUrl, accessToken, cacheTtlMs = 30_000 }) {
       }
       try {
         const playlist = await fetchPlaylist();
-        res.writeHead(200, {
+
+        // ⚠️ РАДИ ЧЕГО ЗДЕСЬ GZIP. Каталог отдавался 824 КБ БЕЗ СЖАТИЯ, причём
+        // `Accept-Encoding: gzip` игнорировался — заголовка `content-encoding`
+        // в ответе не было вовсе. Это ~17 секунд молчания на медленном 3G ради
+        // списка, из которого приложению нужны несколько десятков строк, и
+        // снаружи это выглядит ровно как «ТВ не работает». M3U — текст с
+        // огромным повтором, он жмётся вшестеро и лучше.
+        //
+        // Сжимаем ТОЛЬКО когда клиент попросил: в HLS-плеерах и прокси
+        // встречаются клиенты, которые пришлют пустой Accept-Encoding, и
+        // отдать им gzip значит отдать мусор.
+        const wantsGzip = /\bgzip\b/i.test(req.headers['accept-encoding'] || '');
+        const headers = {
           'content-type': playlist.contentType,
-          'cache-control': `public, max-age=${Math.floor(cacheTtlMs / 1000)}`,
-        });
+          // `stale-while-revalidate` — чтобы браузер показал прежний список
+          // сразу, а обновил его в фоне. Без него каждые max-age секунд экран
+          // снова ждёт полный ответ, и ожидание видно.
+          'cache-control': `public, max-age=${Math.floor(cacheTtlMs / 1000)}, stale-while-revalidate=300`,
+          // ⚠️ Без `vary` общий кэш (CDN, прокси оператора) отдаст сжатый ответ
+          // клиенту, который сжатие не просил, и тот получит двоичный мусор
+          // вместо плейлиста.
+          vary: 'accept-encoding',
+        };
+
+        if (wantsGzip && playlist.gzipped) {
+          headers['content-encoding'] = 'gzip';
+          headers['content-length'] = String(playlist.gzipped.length);
+          res.writeHead(200, headers);
+          res.end(playlist.gzipped);
+          return;
+        }
+
+        headers['content-length'] = String(Buffer.byteLength(playlist.body));
+        res.writeHead(200, headers);
         res.end(playlist.body);
       } catch (err) {
         console.error('Failed to fetch playlist:', err.message);
