@@ -44,6 +44,33 @@ function createRequestHandler({ sourceUrl, accessToken, cacheTtlMs = 30_000 }) {
   return async function handler(req, res) {
     const url = new URL(req.url, `http://${req.headers.host}`);
 
+    // ⚠️ БЕЗ ЭТОГО ЗАГОЛОВКА ЭКРАН ТВ ПУСТ, И ЭТО НЕ ТЕОРИЯ — так и было.
+    // Приложение живёт на sherlock-scholes.vercel.app, релей на railway.app:
+    // запрос кросс-доменный, и браузер выбрасывает ответ, если сервер не
+    // разрешил origin явно. Снаружи это выглядит как «Не удалось загрузить
+    // список каналов» — то есть как поломка приложения, а не отсутствие
+    // одной строки здесь.
+    //
+    // `*`, а не конкретный домен: у каждого preview-развёртывания Vercel свой
+    // origin (sherlock-scholes-git-…vercel.app), и белый список пришлось бы
+    // править под каждую ветку. Каталог публичен, авторизации и cookie у него
+    // нет, отдавать его кому угодно ничем не грозит: ссылки внутри и так
+    // ведут на чужие серверы.
+    res.setHeader('access-control-allow-origin', '*');
+
+    // Предварительный запрос. Простой GET его не вызывает, но плееры и
+    // расширения умеют слать заголовки, которые вызывают, — и тогда ответ на
+    // OPTIONS решает всё.
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, {
+        'access-control-allow-methods': 'GET, HEAD, OPTIONS',
+        'access-control-allow-headers': 'range, accept, accept-encoding',
+        'access-control-max-age': '86400',
+      });
+      res.end();
+      return;
+    }
+
     if (url.pathname === '/healthz') {
       res.writeHead(200, { 'content-type': 'text/plain' });
       res.end('ok');

@@ -180,3 +180,67 @@ test('GET /playlist.m3u8 объявляет vary: accept-encoding', async () => 
     upstream.server.close();
   }
 });
+
+// ─── CORS ───────────────────────────────────────────────────────────────────
+//
+// ⚠️ ЭТО НЕ ГИГИЕНА, А ПОЧИНКА ПУСТОГО ЭКРАНА. Приложение живёт на
+// sherlock-scholes.vercel.app, релей — на railway.app. Запрос кросс-доменный,
+// и без явного разрешения браузер выбрасывает ответ, каким бы правильным он
+// ни был. Владелец видел «Не удалось загрузить список каналов» именно из-за
+// отсутствия одной этой строки.
+//
+// Отдельно стоит записать, ПОЧЕМУ это не поймали раньше: браузерная проверка
+// в той сессии ходила через прокси, который сам подставлял
+// access-control-allow-origin. Стенд маскировал ровно ту поломку, ради
+// которой его завели.
+
+test('GET /playlist.m3u8 разрешает кросс-доменный запрос', async () => {
+  const upstream = await startMockUpstream('#EXTM3U\n#EXTINF:-1,Ch\nhttps://e.test/c.m3u8\n');
+  const handler = createRequestHandler({ sourceUrl: upstream.url, cacheTtlMs: 60_000 });
+  const { server, baseUrl } = await startHttpServer(handler);
+  try {
+    const res = await fetch(`${baseUrl}/playlist.m3u8`, {
+      headers: { origin: 'https://sherlock-scholes.vercel.app' },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('access-control-allow-origin'), '*');
+    await res.text();
+  } finally {
+    server.close();
+    upstream.server.close();
+  }
+});
+
+// Предварительный запрос: простой GET его не вызывает, но плееры и расширения
+// умеют слать заголовки, которые вызывают, — и тогда ответ на OPTIONS решает
+// всё. 204 без тела, с перечисленными методами.
+test('OPTIONS отвечает 204 и перечисляет методы', async () => {
+  const handler = createRequestHandler({ sourceUrl: 'http://unused.invalid' });
+  const { server, baseUrl } = await startHttpServer(handler);
+  try {
+    const res = await fetch(`${baseUrl}/playlist.m3u8`, {
+      method: 'OPTIONS',
+      headers: { origin: 'https://sherlock-scholes.vercel.app' },
+    });
+    assert.equal(res.status, 204);
+    assert.equal(res.headers.get('access-control-allow-origin'), '*');
+    assert.match(res.headers.get('access-control-allow-methods') || '', /GET/);
+  } finally {
+    server.close();
+  }
+});
+
+// CORS обязан стоять и на ошибке, иначе браузер не покажет даже её причину:
+// вместо «upstream недоступен» разработчик увидит невнятный сетевой сбой.
+test('CORS есть и когда апстрим лёг', async () => {
+  const handler = createRequestHandler({ sourceUrl: 'http://127.0.0.1:1/nope', cacheTtlMs: 0 });
+  const { server, baseUrl } = await startHttpServer(handler);
+  try {
+    const res = await fetch(`${baseUrl}/playlist.m3u8`);
+    assert.equal(res.status, 502);
+    assert.equal(res.headers.get('access-control-allow-origin'), '*');
+    await res.text();
+  } finally {
+    server.close();
+  }
+});
