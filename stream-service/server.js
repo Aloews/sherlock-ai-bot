@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
+import { createLivekitTokenHandler, TOKEN_TTL_SECONDS } from './livekit.js';
 
 function createPlaylistCache(sourceUrl, cacheTtlMs) {
   let cache = null;
@@ -34,11 +35,16 @@ function isAuthorized(url, accessToken) {
   return url.searchParams.get('token') === accessToken;
 }
 
-function createRequestHandler({ sourceUrl, accessToken, cacheTtlMs = 30_000 }) {
+function createRequestHandler({ sourceUrl, accessToken, cacheTtlMs = 30_000, livekit }) {
   const fetchPlaylist = createPlaylistCache(sourceUrl, cacheTtlMs);
+  // Выдача пропусков в комнату совместного просмотра — отдельный модуль и
+  // отдельный секрет. Она ничего не знает о плейлисте, плейлист — о ней.
+  const handleLivekit = createLivekitTokenHandler(livekit ?? {});
 
   return async function handler(req, res) {
     const url = new URL(req.url, `http://${req.headers.host}`);
+
+    if (handleLivekit(req, res, url)) return;
 
     if (url.pathname === '/healthz') {
       res.writeHead(200, { 'content-type': 'text/plain' });
@@ -85,6 +91,16 @@ if (isMainModule) {
     sourceUrl,
     accessToken: process.env.STREAM_ACCESS_TOKEN,
     cacheTtlMs: Number(process.env.PLAYLIST_CACHE_TTL_MS || 30_000),
+    // Без этих трёх переменных /livekit-token честно отвечает 503, а релей
+    // плейлиста работает как работал: совместный просмотр — слой сверху, а
+    // не условие работы сервиса.
+    livekit: {
+      apiKey: process.env.LIVEKIT_API_KEY,
+      apiSecret: process.env.LIVEKIT_API_SECRET,
+      serverUrl: process.env.LIVEKIT_URL,
+      accessToken: process.env.LIVEKIT_ACCESS_TOKEN,
+      ttlSeconds: Number(process.env.LIVEKIT_TOKEN_TTL_SECONDS || TOKEN_TTL_SECONDS),
+    },
   });
 
   createServer(handler).listen(port, () => {
