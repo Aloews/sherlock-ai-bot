@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
+import { gzipSync } from 'node:zlib';
 import { createLivekitTokenHandler, TOKEN_TTL_SECONDS } from './livekit.js';
 
 function createPlaylistCache(sourceUrl, cacheTtlMs) {
@@ -16,7 +17,10 @@ function createPlaylistCache(sourceUrl, cacheTtlMs) {
       }
       const body = await response.text();
       const contentType = response.headers.get('content-type') || 'application/vnd.apple.mpegurl';
-      cache = { body, contentType, fetchedAt: Date.now() };
+      // ⚠️ СЖИМАЕМ ОДИН РАЗ НА ОБНОВЛЕНИЕ, А НЕ НА ЗАПРОС. Каталог — 824 КБ,
+      // и gzip по нему стоит десятки миллисекунд процессора. На запрос это
+      // означало бы платить их каждому зрителю; на обновление — раз в TTL.
+      cache = { body, contentType, fetchedAt: Date.now(), gzipped: gzipSync(body) };
       return cache;
     } catch (err) {
       if (cache) {
@@ -44,7 +48,38 @@ function createRequestHandler({ sourceUrl, accessToken, cacheTtlMs = 30_000, liv
   return async function handler(req, res) {
     const url = new URL(req.url, `http://${req.headers.host}`);
 
+    // ⚠️ БЕЗ ЭТОГО ЗАГОЛОВКА ЭКРАН ТВ ПУСТ, И ЭТО НЕ ТЕОРИЯ — так и было.
+    // Приложение живёт на sherlock-scholes.vercel.app, релей на railway.app:
+    // запрос кросс-доменный, и браузер выбрасывает ответ, если сервер не
+    // разрешил origin явно. Снаружи это выглядит как «Не удалось загрузить
+    // список каналов» — то есть как поломка приложения, а не отсутствие
+    // одной строки здесь.
+    //
+    // `*`, а не конкретный домен: у каждого preview-развёртывания Vercel свой
+    // origin (sherlock-scholes-git-…vercel.app), и белый список пришлось бы
+    // править под каждую ветку. Каталог публичен, авторизации и cookie у него
+    // нет, отдавать его кому угодно ничем не грозит: ссылки внутри и так
+    // ведут на чужие серверы.
+    res.setHeader('access-control-allow-origin', '*');
+
+    // ⚠️ ВЫДАЧА ПРОПУСКОВ — ДО ОБЩЕГО OPTIONS, и это не вкусовщина. Она
+    // отвечает на СВОЙ предварительный запрос сама, своим списком методов и
+    // заголовков; общий ответ ниже перечисляет то, что нужно плееру
+    // (`range`, `accept-encoding`), и к выдаче пропусков отношения не имеет.
     if (handleLivekit(req, res, url)) return;
+
+    // Предварительный запрос. Простой GET его не вызывает, но плееры и
+    // расширения умеют слать заголовки, которые вызывают, — и тогда ответ на
+    // OPTIONS решает всё.
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, {
+        'access-control-allow-methods': 'GET, HEAD, OPTIONS',
+        'access-control-allow-headers': 'range, accept, accept-encoding',
+        'access-control-max-age': '86400',
+      });
+      res.end();
+      return;
+    }
 
     if (url.pathname === '/healthz') {
       res.writeHead(200, { 'content-type': 'text/plain' });
@@ -60,10 +95,40 @@ function createRequestHandler({ sourceUrl, accessToken, cacheTtlMs = 30_000, liv
       }
       try {
         const playlist = await fetchPlaylist();
-        res.writeHead(200, {
+
+        // ⚠️ РАДИ ЧЕГО ЗДЕСЬ GZIP. Каталог отдавался 824 КБ БЕЗ СЖАТИЯ, причём
+        // `Accept-Encoding: gzip` игнорировался — заголовка `content-encoding`
+        // в ответе не было вовсе. Это ~17 секунд молчания на медленном 3G ради
+        // списка, из которого приложению нужны несколько десятков строк, и
+        // снаружи это выглядит ровно как «ТВ не работает». M3U — текст с
+        // огромным повтором, он жмётся вшестеро и лучше.
+        //
+        // Сжимаем ТОЛЬКО когда клиент попросил: в HLS-плеерах и прокси
+        // встречаются клиенты, которые пришлют пустой Accept-Encoding, и
+        // отдать им gzip значит отдать мусор.
+        const wantsGzip = /\bgzip\b/i.test(req.headers['accept-encoding'] || '');
+        const headers = {
           'content-type': playlist.contentType,
-          'cache-control': `public, max-age=${Math.floor(cacheTtlMs / 1000)}`,
-        });
+          // `stale-while-revalidate` — чтобы браузер показал прежний список
+          // сразу, а обновил его в фоне. Без него каждые max-age секунд экран
+          // снова ждёт полный ответ, и ожидание видно.
+          'cache-control': `public, max-age=${Math.floor(cacheTtlMs / 1000)}, stale-while-revalidate=300`,
+          // ⚠️ Без `vary` общий кэш (CDN, прокси оператора) отдаст сжатый ответ
+          // клиенту, который сжатие не просил, и тот получит двоичный мусор
+          // вместо плейлиста.
+          vary: 'accept-encoding',
+        };
+
+        if (wantsGzip && playlist.gzipped) {
+          headers['content-encoding'] = 'gzip';
+          headers['content-length'] = String(playlist.gzipped.length);
+          res.writeHead(200, headers);
+          res.end(playlist.gzipped);
+          return;
+        }
+
+        headers['content-length'] = String(Buffer.byteLength(playlist.body));
+        res.writeHead(200, headers);
         res.end(playlist.body);
       } catch (err) {
         console.error('Failed to fetch playlist:', err.message);
