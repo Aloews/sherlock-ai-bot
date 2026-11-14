@@ -81,3 +81,8 @@ This section is shared across the active project maps. It records installation a
 | codebase-memory-mcp | Recorded here | Not verified; no persistent supported host indexed |
 | Spotify Portal / shunt | Recorded here | Not verified; Portal authentication and AiKA readiness not established |
 
+
+## Agent runtime status — 2026-11-14
+
+- Caveman 4.1.0 is installed in the Product Factory Claude Code workflow and loaded into the Sherlock Scholes local Qwen agent prompt; neither integration proves this repository has its own active coding-agent runtime.
+- Qwen2.5-Coder 3B is not configured as a persistent bot inference service here. Keep Starimg runtime inference separate from the local GitHub Actions coding model.
