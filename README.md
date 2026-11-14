@@ -1,5 +1,7 @@
 # Sherlock AI Bot
 
+[Project map](./docs/MAP.md) — project architecture, agent workflow and verified setup status.
+
 Telegram-бот на TypeScript, использующий Starimg AI (OpenAI-совместимый API) для ответов на сообщения пользователей.
 
 ## Возможности
