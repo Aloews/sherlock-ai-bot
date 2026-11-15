@@ -2,7 +2,7 @@
 import json, os, re, subprocess, sys, urllib.request
 from pathlib import Path
 MODEL = 'qwen2.5-coder:3b'
-ALLOWED = ('app/', 'services/', 'tests/', 'test/', 'docs/', 'scripts/')
+ALLOWED = ('app/', 'api/', 'services/', 'src/', 'lib/', 'tests/', 'test/', 'docs/', 'scripts/', 'stream-service/')
 def main():
     event = json.loads(Path(os.environ['GITHUB_EVENT_PATH']).read_text())
     repo = os.environ['GITHUB_REPOSITORY']
